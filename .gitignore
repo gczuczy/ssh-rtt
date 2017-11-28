@@ -1,3 +1,15 @@
+# executable
+ssh-rtt
+
+#editor backups
+*~
+
+# cmake stuff
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+
 # Prerequisites
 *.d
 
