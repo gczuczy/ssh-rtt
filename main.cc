@@ -11,23 +11,56 @@
 
 #include <string>
 #include <istream>
+#include <iostream>
 #include <sstream>
 #include <chrono>
 #include <vector>
 #include <list>
 
-static int ssh(const std::string &_target, int _stdin, int _stdout);
+#include <boost/program_options.hpp>
+
+namespace po = boost::program_options;
+
+static int ssh(const std::string &_sshpath, const std::string &_target, int _stdin, int _stdout);
 static void setnonblock(int _fd);
 static uint64_t measure(int _stdin, int _stdout, std::string &_msg);
 static bool endswidth(const std::string &_str, const std::string &_end);
 
 int main(int argc, char *argv[]) {
 
-  if ( argc != 2 ) {
-    printf("Usage: %s <hostname>\n", argv[0]);
+  std::string target, sshpath;
+
+  po::options_description desc("Options");
+  desc.add_options()
+    ("help,h", "Display usage")
+    ("ssh,s", po::value<std::string>(&sshpath)->default_value("/usr/bin/ssh"), "Path to the ssh executable to use")
+    ("target,t", po::value<std::string>(&target), "Target host (with optional username)");
+  po::positional_options_description pdesc;
+  pdesc.add("target", 1);
+
+  po::variables_map vm;
+  try {
+    po::store(po::command_line_parser(argc, argv)
+	      .options(desc)
+	      .positional(pdesc).run(),
+	      vm);
+    po::notify(vm);
+  }
+  catch (std::exception &e) {
+    std::cout << e.what() << std::endl;
     return 1;
   }
-  std::string target(argv[1]);
+
+  if ( vm.count("help") ) {
+    std::cout << desc << std::endl;
+    return 0;
+  }
+
+  if ( !vm.count("target") ) {
+    std::cerr << "Target is not specified" << std::endl;
+    std::cerr << desc << std::endl;
+    return 1;
+  }
 
   printf("Target host: %s\n", target.c_str());
 
@@ -44,7 +77,7 @@ int main(int argc, char *argv[]) {
 
   // forking here, and inside dealing with the child process
   if ( (childpid = fork()) == 0 ) {
-    int ret = ssh(target, inpipefd[0], outpipefd[1]);
+    int ret = ssh(sshpath, target, inpipefd[0], outpipefd[1]);
     std::string errstr = "unknown";
     switch (errno) {
     case E2BIG: errstr = "E2BIG"; break;
@@ -114,7 +147,7 @@ int main(int argc, char *argv[]) {
     for (auto &it: teststrings) {
       uint64_t t = measure(ssh_stdin, ssh_stdout, it);
       results.push_back(t);
-      printf("Len: %u time: %lu ms\n", it.length(), t);
+      printf("Len: %lu time: %lu ms\n", it.length(), t);
     }
   }
 
@@ -131,12 +164,12 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-int ssh(const std::string &_target, int _stdin, int _stdout) {
+int ssh(const std::string &_sshpath, const std::string &_target, int _stdin, int _stdout) {
   dup2(_stdin, STDIN_FILENO);
   dup2(_stdout, STDOUT_FILENO);
   dup2(_stdout, STDERR_FILENO);
 
-  char *argv[] = {"/usr/bin/ssh",
+  char *argv[] = {(char*)_sshpath.c_str(),
 		  "-ttt",
 		  "-q",
 		  "-vv",
