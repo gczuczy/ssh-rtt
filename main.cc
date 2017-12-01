@@ -29,11 +29,13 @@ static bool endswidth(const std::string &_str, const std::string &_end);
 int main(int argc, char *argv[]) {
 
   std::string target, sshpath;
+  bool measurement_only;
 
   po::options_description desc("Options");
   desc.add_options()
     ("help,h", "Display usage")
     ("ssh,s", po::value<std::string>(&sshpath)->default_value("/usr/bin/ssh"), "Path to the ssh executable to use")
+    ("measurement-only,m", po::bool_switch(&measurement_only)->default_value(false), "Only display the measured value")
     ("target,t", po::value<std::string>(&target), "Target host (with optional username)");
   po::positional_options_description pdesc;
   pdesc.add("target", 1);
@@ -62,7 +64,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  printf("Target host: %s\n", target.c_str());
+  if ( !measurement_only )
+    printf("Target host: %s\n", target.c_str());
 
   int inpipefd[2];
   int outpipefd[2];
@@ -135,7 +138,8 @@ int main(int argc, char *argv[]) {
   }
   // now we are logged in here
 
-  printf("Logged in, starting measurement\n");
+  if ( !measurement_only )
+    printf("Logged in, starting measurement\n");
 
   std::list<uint64_t> results;
   std::vector<std::string> teststrings{"A",
@@ -143,11 +147,13 @@ int main(int argc, char *argv[]) {
       "a quick brown fox jumps over the lazy dog"};
   int iterations=10;
   for (int i=0; i<iterations; ++i) {
-    printf("Iteration %i/%i\n", i+1, iterations);
+    if ( !measurement_only )
+      printf("Iteration %i/%i\n", i+1, iterations);
     for (auto &it: teststrings) {
       uint64_t t = measure(ssh_stdin, ssh_stdout, it);
       results.push_back(t);
-      printf("Len: %lu time: %lu ms\n", it.length(), t);
+      if ( !measurement_only )
+	printf("Len: %lu time: %lu ms\n", it.length(), t);
     }
   }
 
@@ -156,7 +162,11 @@ int main(int argc, char *argv[]) {
     avg += it;
   }
   avg /= results.size();
-  printf("Average latency: %lu ms\n", avg);
+  if ( !measurement_only ) {
+    printf("Average latency: %lu ms\n", avg);
+  } else {
+    printf("%lu ms\n", avg);
+  }
   
   write(ssh_stdin, "logout\n", 7);
   wait(NULL);
