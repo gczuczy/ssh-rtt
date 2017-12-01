@@ -7,14 +7,19 @@
 #include <string.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include <string>
 #include <istream>
 #include <sstream>
 #include <chrono>
+#include <vector>
+#include <list>
 
 static int ssh(const std::string &_target, int _stdin, int _stdout);
 static void setnonblock(int _fd);
+static uint64_t measure(int _stdin, int _stdout, std::string &_msg);
+static bool endswidth(const std::string &_str, const std::string &_end);
 
 int main(int argc, char *argv[]) {
 
@@ -99,27 +104,26 @@ int main(int argc, char *argv[]) {
 
   printf("Logged in, starting measurement\n");
 
-  inbuf.clear();
-  std::string cmd("echo foobar\n");
-  auto time_recv = std::chrono::high_resolution_clock::now();
-  auto time_send = std::chrono::high_resolution_clock::now();
-  write(ssh_stdin, cmd.c_str(), cmd.length());
-  while (true) {
-    recvlen = read(ssh_stdout, buf, sizeof(buf)-1);
-    if ( recvlen > 0 ) {
-      inbuf += std::string(buf, recvlen);
-      if ( inbuf == "foobar\n" ) {
-	time_recv = std::chrono::high_resolution_clock::now();
-	break;
-      } else {
-	printf("'%s' != 'foobar'\n", inbuf.c_str());
-      }
+  std::list<uint64_t> results;
+  std::vector<std::string> teststrings{"A",
+      "foobar",
+      "a quick brown fox jumps over the lazy dog"};
+  int iterations=10;
+  for (int i=0; i<iterations; ++i) {
+    printf("Iteration %i/%i\n", i+1, iterations);
+    for (auto &it: teststrings) {
+      uint64_t t = measure(ssh_stdin, ssh_stdout, it);
+      results.push_back(t);
+      printf("Len: %u time: %lu ms\n", it.length(), t);
     }
-    usleep(1);
   }
 
-  auto timediff = std::chrono::duration_cast<std::chrono::milliseconds>(time_recv - time_send);
-  printf("Foo round trip time: %lu ms\n", timediff.count());
+  uint64_t avg = 0;
+  for (auto &it: results) {
+    avg += it;
+  }
+  avg /= results.size();
+  printf("Average latency: %lu ms\n", avg);
   
   write(ssh_stdin, "logout\n", 7);
   wait(NULL);
@@ -160,4 +164,39 @@ void setnonblock(int _fd) {
   if ( flags >= 0 ) {
     fcntl(_fd, F_SETFL, flags | O_NONBLOCK);
   }
+}
+
+uint64_t measure(int _stdin, int _stdout, std::string &_msg) {
+  std::string inbuf;
+
+  char buf[1024];
+  int len;
+  len = snprintf(buf, 1023, "echo '%s'\n", _msg.c_str());
+  std::string cmd(buf, len);
+  std::string replystr(_msg);
+  replystr += "\n";
+
+  auto time_recv = std::chrono::high_resolution_clock::now();
+  auto time_send = std::chrono::high_resolution_clock::now();
+  write(_stdin, cmd.c_str(), cmd.length());
+  while (true) {
+    len = read(_stdout, buf, sizeof(buf)-1);
+    if ( len > 0 ) {
+      inbuf += std::string(buf, len);
+      if ( endswidth(inbuf, replystr) ) {
+	time_recv = std::chrono::high_resolution_clock::now();
+	break;
+      } else {
+	printf("'%s' != 'foobar'\n", inbuf.c_str());
+      }
+    }
+    usleep(1);
+  }
+
+  auto timediff = std::chrono::duration_cast<std::chrono::milliseconds>(time_recv - time_send);
+  return timediff.count();
+}
+
+bool endswidth(const std::string &_str, const std::string &_end) {
+  return true;
 }
